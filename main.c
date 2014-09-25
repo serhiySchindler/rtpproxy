@@ -98,7 +98,8 @@ usage(void)
     fprintf(stderr, "usage: rtpproxy [-2fvFiPa] [-l addr1[/addr2]] "
       "[-6 addr1[/addr2]] [-s path]\n\t[-t tos] [-r rdir [-S sdir]] [-T ttl] "
       "[-L nfiles] [-m port_min]\n\t[-M port_max] [-u uname[:gname]] "
-      "[-n timeout_socket] [-d log_level]\n");
+      "[-n timeout_socket] [-d log_level] "
+      "[-A addr1[/addr2]]\n");
     exit(1);
 }
 
@@ -120,7 +121,7 @@ ehandler(void)
     rtpp_log_close(glog);
 }
 
-static void 
+static void
 init_config(struct cfg *cf, int argc, char **argv)
 {
     int ch, i;
@@ -132,6 +133,9 @@ init_config(struct cfg *cf, int argc, char **argv)
 
     cf->port_min = PORT_MIN;
     cf->port_max = PORT_MAX;
+
+    cf->advaddr[0] = NULL;
+    cf->advaddr[1] = NULL;
 
     cf->max_ttl = SESSION_TIMEOUT;
     cf->tos = TOS;
@@ -146,7 +150,7 @@ init_config(struct cfg *cf, int argc, char **argv)
     if (getrlimit(RLIMIT_NOFILE, &(cf->nofile_limit)) != 0)
 	err(1, "getrlimit");
 
-    while ((ch = getopt(argc, argv, "vf2Rl:6:s:S:t:r:p:T:L:m:M:u:Fin:Pad:")) != -1)
+    while ((ch = getopt(argc, argv, "vf2Rl:6:s:S:t:r:p:T:L:m:M:u:Fin:Pad:A:")) != -1)
 	switch (ch) {
 	case 'f':
 	    cf->nodaemon = 1;
@@ -171,6 +175,23 @@ init_config(struct cfg *cf, int argc, char **argv)
 		cf->bmode = 1;
 	    }
 	    break;
+
+    case 'A':
+        cf->advaddr[0] = optarg;
+        cf->advaddr[1] = strchr(cf->advaddr[0], '/');
+        if (cf->advaddr[1] != NULL) {
+            *cf->advaddr[1] = '\0';
+            cf->advaddr[1]++;
+            if (*cf->advaddr[0] == 0) {
+                errx(1, "first advertised address is invalid");
+                exit(0);
+            }
+            if (*cf->advaddr[1] == 0) {
+                errx(1, "second advertised address is invalid");
+                exit(0);
+            }
+        }
+        break;
 
 	case 's':
 	    if (strncmp("udp:", optarg, 4) == 0) {
@@ -339,13 +360,13 @@ init_config(struct cfg *cf, int argc, char **argv)
     }
 
     if (cf->port_min <= 0 || cf->port_min > 65535)
-	errx(1, "invalid value of the port_min argument, "
-	  "not in the range 1-65535");
+        errx(1, "invalid value of the port_min argument, "
+          "not in the range 1-65535");
     if (cf->port_max <= 0 || cf->port_max > 65535)
-	errx(1, "invalid value of the port_max argument, "
-	  "not in the range 1-65535");
+        errx(1, "invalid value of the port_max argument, "
+          "not in the range 1-65535");
     if (cf->port_min > cf->port_max)
-	errx(1, "port_min should be less than port_max");
+        errx(1, "port_min should be less than port_max");
 
     cf->sessions = malloc((sizeof cf->sessions[0]) *
       (((cf->port_max - cf->port_min + 1) * 2) + 1));
@@ -362,44 +383,47 @@ init_config(struct cfg *cf, int argc, char **argv)
     }
 
     for (i = 0; i < 2; i++) {
-	if (bh[i] != NULL && *bh[i] == '\0')
-	    bh[i] = NULL;
-	if (bh6[i] != NULL && *bh6[i] == '\0')
-	    bh6[i] = NULL;
+        if (bh[i] != NULL && *bh[i] == '\0')
+            bh[i] = NULL;
+        if (bh6[i] != NULL && *bh6[i] == '\0')
+            bh6[i] = NULL;
     }
 
     i = ((bh[0] == NULL) ? 0 : 1) + ((bh[1] == NULL) ? 0 : 1) +
       ((bh6[0] == NULL) ? 0 : 1) + ((bh6[1] == NULL) ? 0 : 1);
     if (cf->bmode != 0) {
-	if (bh[0] != NULL && bh6[0] != NULL)
-	    errx(1, "either IPv4 or IPv6 should be configured for external "
-	      "interface in bridging mode, not both");
-	if (bh[1] != NULL && bh6[1] != NULL)
-	    errx(1, "either IPv4 or IPv6 should be configured for internal "
-	      "interface in bridging mode, not both");
-	if (i != 2)
-	    errx(1, "incomplete configuration of the bridging mode - exactly "
-	      "2 listen addresses required, %d provided", i);
-    } else if (i != 1) {
-	errx(1, "exactly 1 listen addresses required, %d provided", i);
-    }
+        if (bh[0] != NULL && bh6[0] != NULL)
+            errx(1, "either IPv4 or IPv6 should be configured for external "
+              "interface in bridging mode, not both");
+        if (bh[1] != NULL && bh6[1] != NULL)
+            errx(1, "either IPv4 or IPv6 should be configured for internal "
+              "interface in bridging mode, not both");
+        if (cf->advaddr[0] != NULL && cf->advaddr[1] == NULL)
+            errx(1, "two advertised addresses are required for internal "
+                    "and external interfaces in bridging mode");
+        if (i != 2)
+            errx(1, "incomplete configuration of the bridging mode - exactly "
+              "2 listen addresses required, %d provided", i);
+        } else if (i != 1) {
+        errx(1, "exactly 1 listen addresses required, %d provided", i);
+        }
 
-    for (i = 0; i < 2; i++) {
-	cf->bindaddr[i] = NULL;
-	if (bh[i] != NULL) {
-	    cf->bindaddr[i] = malloc(sizeof(struct sockaddr_storage));
-	    setbindhost(cf->bindaddr[i], AF_INET, bh[i], SERVICE);
-	    continue;
-	}
-	if (bh6[i] != NULL) {
-	    cf->bindaddr[i] = malloc(sizeof(struct sockaddr_storage));
-	    setbindhost(cf->bindaddr[i], AF_INET6, bh6[i], SERVICE);
-	    continue;
-	}
+        for (i = 0; i < 2; i++) {
+        cf->bindaddr[i] = NULL;
+        if (bh[i] != NULL) {
+            cf->bindaddr[i] = malloc(sizeof(struct sockaddr_storage));
+            setbindhost(cf->bindaddr[i], AF_INET, bh[i], SERVICE);
+            continue;
+        }
+        if (bh6[i] != NULL) {
+            cf->bindaddr[i] = malloc(sizeof(struct sockaddr_storage));
+            setbindhost(cf->bindaddr[i], AF_INET6, bh6[i], SERVICE);
+            continue;
+        }
     }
     if (cf->bindaddr[0] == NULL) {
-	cf->bindaddr[0] = cf->bindaddr[1];
-	cf->bindaddr[1] = NULL;
+        cf->bindaddr[0] = cf->bindaddr[1];
+        cf->bindaddr[1] = NULL;
     }
 }
 

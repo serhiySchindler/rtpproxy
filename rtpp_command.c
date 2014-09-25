@@ -200,10 +200,22 @@ reply_port(struct cfg *cf, int fd, struct sockaddr_storage *raddr,
 	cp += len;
     }
     if (lia[0] == NULL || ishostnull(lia[0]))
-	len += sprintf(cp, "%d\n", lport);
-    else
-	len += sprintf(cp, "%d %s%s\n", lport, addr2char(lia[0]),
-	  (lia[0]->sa_family == AF_INET) ? "" : " 6");
+        len += sprintf(cp, "%d\n", lport);
+    else {
+        if (cf->advaddr[0] != NULL) {
+            if (cf->bmode != 0 && cf->advaddr[1] != NULL
+                && lia[0] == cf->bindaddr[1]) {
+                len += sprintf(cp, "%d %s%s\n", lport, cf->advaddr[1],
+                               (lia[0]->sa_family == AF_INET) ? "" : " 6");
+            } else {
+                len += sprintf(cp, "%d %s%s\n", lport, cf->advaddr[0],
+                               (lia[0]->sa_family == AF_INET) ? "" : " 6");
+            }
+        } else {
+            len += sprintf(cp, "%d %s%s\n", lport, addr2char(lia[0]),
+                           (lia[0]->sa_family == AF_INET) ? "" : " 6");
+        }
+    }
     doreply(cf, fd, buf, len, raddr, rlen);
 }
 

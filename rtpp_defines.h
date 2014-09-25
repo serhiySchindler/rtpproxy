@@ -70,7 +70,7 @@
  * TTL counters are used to detect the absence of audio packets
  * in either direction.  When the counter reaches 0, the call timeout
  * occurs.
- */ 
+ */
 typedef enum {
     TTL_UNIFIED = 0,		/* all TTL counters must reach 0 */
     TTL_INDEPENDENT = 1		/* any TTL counter reaches 0 */
@@ -104,6 +104,7 @@ struct cfg {
      * mode enabled.
      */
     struct sockaddr *bindaddr[2];	/* RTP socket(s) addresses */
+    char *advaddr[2];               /* advertised addresses */
     int tos;
 
     const char *rdir;
